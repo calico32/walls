@@ -1,0 +1,31 @@
+storage {
+    // where to store original wallpaper files
+    //    default: $XDG_DATA_HOME/walls or ~/.local/share/walls
+    //sources "~/.local/share/walls"
+
+    // where to cache wallpapers with effects
+    //    default: $XDG_CACHE_HOME/walls or ~/.cache/walls
+    //cache "~/.cache/walls"
+
+    // where to store runtime information
+    //    default: $XDG_RUNTIME_DIR/walls or /run/user/$(id -u)/walls
+    //runtime "/run/user/1000/walls"
+}
+
+// apply effects to wallpapers
+effects /* default=darken */ {
+    // <name> <command to transform image: %i = input path, %o = output path>
+    //darken magick %i -brightness-contrast "-30x-40" %o
+    //blur   magick %i -blur "0x8" %o
+}
+
+behavior {
+    // tell walls how to set the wallpaper:
+    //    pkill: kill all processes named <name> except the current one after setting the wallpaper
+    //    effect: use the effect named <name> to transform the wallpaper before setting it
+    //set effect=blur pkill=swaybg swaybg -i %w -m fill
+
+    // set multiple wallpapers at once (for different layers), using different effects:
+    //set pkill=swaybg swaybg -i %w -m fill
+    //set effect=blur swww img %w
+}
