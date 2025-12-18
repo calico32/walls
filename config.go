@@ -24,17 +24,17 @@ type StorageConfig struct {
 }
 
 type EffectsConfig struct {
-	Default string `kdl:"default"`
-	Effects map[string][]string
+	Default string              `kdl:"default"`
+	Effects map[string][]string `kdl:",children"`
 }
 
 type BehaviorConfig struct {
 	AllowRepeat bool  `kdl:"allow-repeat"`
-	Set         []Set `kdl:"set"`
+	Set         []Set `kdl:"set,multiple"`
 }
 
 type Set struct {
-	Command []string `kdl:"command"`
+	Command []string `kdl:",arguments"`
 	Effect  string   `kdl:"effect"`
 	Pkill   string   `kdl:"pkill"`
 }
@@ -94,167 +94,28 @@ func expandPath(path string) string {
 }
 
 func parseConfig(r io.Reader) (*Config, error) {
-	doc, err := kdl.NewParser(kdl.KdlVersion2, r).ParseDocument()
+	var config Config
+	err := kdl.Decode(r, &config)
 	if err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
-
-	var parseErrors []error
-	parseError := func(err error) {
-		parseErrors = append(parseErrors, err)
-	}
-
-	config := DefaultConfig()
-
-	if n := doc.GetNode("storage"); n != nil {
-		sourcePath, err := kdl.GetKV(&n.Children, "sources", kdl.AsString)
-		if err == nil {
-			config.Storage.Sources = expandPath(sourcePath)
-			if _, err := os.Stat(sourcePath); errors.Is(err, os.ErrNotExist) {
-				parseError(fmt.Errorf("storage.sources: directory does not exist"))
-			} else {
-				logger.Debugf("using storage.sources: %s", config.Storage.Sources)
-			}
-		} else if !errors.Is(err, kdl.ErrNotFound) {
-			parseError(fmt.Errorf("parsing storage.sources: %w", err))
-		} else {
-			logger.Debugf("using default storage.sources: %s", config.Storage.Sources)
-			os.MkdirAll(config.Storage.Sources, 0755)
-		}
-
-		cachePath, err := kdl.GetKV(&n.Children, "cache", kdl.AsString)
-		if err == nil {
-			config.Storage.Cache = expandPath(cachePath)
-			if _, err := os.Stat(cachePath); errors.Is(err, os.ErrNotExist) {
-				parseError(fmt.Errorf("storage.cache: directory does not exist"))
-			} else {
-				logger.Debugf("using storage.cache: %s", config.Storage.Cache)
-			}
-		} else if !errors.Is(err, kdl.ErrNotFound) {
-			parseError(fmt.Errorf("parsing storage.cache: %w", err))
-		} else {
-			logger.Debugf("using default storage.cache: %s", config.Storage.Cache)
-			os.MkdirAll(config.Storage.Cache, 0755)
-		}
-
-		runtimePath, err := kdl.GetKV(&n.Children, "runtime", kdl.AsString)
-		if err == nil {
-			config.Storage.Runtime = expandPath(runtimePath)
-			if _, err := os.Stat(runtimePath); errors.Is(err, os.ErrNotExist) {
-				parseError(fmt.Errorf("storage.runtime: directory does not exist"))
-			} else {
-				logger.Debugf("using storage.runtime: %s", config.Storage.Runtime)
-			}
-		} else if !errors.Is(err, kdl.ErrNotFound) {
-			parseError(fmt.Errorf("parsing storage.runtime: %w", err))
-		} else {
-			logger.Debugf("using default storage.runtime: %s", config.Storage.Runtime)
-			os.MkdirAll(config.Storage.Runtime, 0755)
-		}
-
-	}
-
-	if n := doc.GetNode("effects"); n != nil {
-		defaultEffect, err := kdl.Get(n, "default", kdl.AsString)
-		if err == nil {
-			config.Effects.Default = defaultEffect
-		} else if !errors.Is(err, kdl.ErrNotFound) {
-			parseError(fmt.Errorf("parsing effects.default: %w", err))
-		}
-
-		for _, effect := range n.Children.Nodes {
-			effectName := effect.Name
-			args, err := kdl.CastAll(effect.Arguments, kdl.AsString)
-			if err != nil {
-				parseError(fmt.Errorf("parsing effects.%s: %w", effectName, err))
-			}
-			hasInput := false
-			hasOutput := false
-			for _, arg := range args {
-				if arg == "%i" {
-					hasInput = true
-				} else if arg == "%o" {
-					hasOutput = true
-				}
-			}
-			if !hasInput {
-				parseError(fmt.Errorf("effects.%s: missing input file placeholder %%i", effectName))
-			}
-			if !hasOutput {
-				parseError(fmt.Errorf("effects.%s: missing output file placeholder %%o", effectName))
-			}
-			config.Effects.Effects[effectName] = args
-		}
-
-		if config.Effects.Default != "" {
-			if _, ok := config.Effects.Effects[config.Effects.Default]; !ok {
-				parseError(fmt.Errorf("effects.default: unknown effect %s", config.Effects.Default))
-			}
-		}
-	}
-
-	if n := doc.GetNode("behavior"); n != nil {
-		d := &n.Children
-
-		allowRepeat, err := kdl.GetKV(d, "allow-repeat", kdl.AsBool)
-		if err == nil {
-			config.Behavior.AllowRepeat = allowRepeat
-		} else if !errors.Is(err, kdl.ErrNotFound) {
-			parseError(fmt.Errorf("parsing behavior.allow-repeat: %w", err))
-		}
-
-		sets := d.GetNodes("set")
-		for _, n := range sets {
-			var set Set
-			set.Command, err = kdl.CastAll(n.Arguments, kdl.AsString)
-			if err != nil {
-				parseError(fmt.Errorf("parsing behavior.set: %w", err))
-			}
-			set.Effect, err = kdl.Get(n, "effect", kdl.AsString)
-			if err != nil && !errors.Is(err, kdl.ErrNotFound) {
-				parseError(fmt.Errorf("parsing behavior.set#effect: %w", err))
-			}
-			set.Pkill, err = kdl.Get(n, "pkill", kdl.AsString)
-			if err != nil && !errors.Is(err, kdl.ErrNotFound) {
-				parseError(fmt.Errorf("parsing behavior.set#pkill: %w", err))
-			}
-
-			if len(set.Command) == 0 {
-				parseError(fmt.Errorf("behavior.set: missing command"))
-			}
-			hasWallpaper := false
-			for _, arg := range set.Command {
-				if arg == "%w" {
-					hasWallpaper = true
-				}
-			}
-			if !hasWallpaper {
-				parseError(fmt.Errorf("behavior.set: missing wallpaper placeholder %%w"))
-			}
-			if set.Effect != "" {
-				if _, ok := config.Effects.Effects[set.Effect]; !ok {
-					parseError(fmt.Errorf("behavior.set: unknown effect %s", set.Effect))
-				}
-			}
-
-			config.Behavior.Set = append(config.Behavior.Set, set)
-		}
-	}
-
-	if len(parseErrors) > 0 {
-		errorText := ""
-		for _, err := range parseErrors {
-			errorText += "  " + err.Error() + "\n"
-		}
-		errorPlural := ""
-		if len(parseErrors) > 1 {
-			errorPlural = "s"
-		}
-		return nil, fmt.Errorf("parsing config: encountered %d error%s\n%s", len(parseErrors), errorPlural, errorText)
-	}
-
 	logger.Debugf("config loaded successfully")
-	return config, nil
+	defaultConfig := DefaultConfig()
+	if config.Storage.Sources == "" {
+		config.Storage.Sources = defaultConfig.Storage.Sources
+	}
+	if config.Storage.Cache == "" {
+		config.Storage.Cache = defaultConfig.Storage.Cache
+	}
+	if config.Storage.Runtime == "" {
+		config.Storage.Runtime = defaultConfig.Storage.Runtime
+	}
+	if config.Effects.Default != "" {
+		if _, ok := config.Effects.Effects[config.Effects.Default]; !ok {
+			return nil, fmt.Errorf("effects.default: unknown effect %s", config.Effects.Default)
+		}
+	}
+	return &config, nil
 }
 
 func loadConfig(path string) (*Config, error) {

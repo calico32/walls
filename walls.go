@@ -30,12 +30,12 @@ type Walls struct {
 }
 
 type Store struct {
-	Wallpapers []*Wallpaper
+	Wallpapers []*Wallpaper `kdl:"wallpaper,multiple" json:"wallpapers"`
 }
 
 type Wallpaper struct {
 	// Unique identifier for the wallpaper
-	Id string `kdl:"id" json:"id"`
+	Id string `kdl:",argument" json:"id"`
 	// Path (relative to the data directory) to the wallpaper file
 	Path string `kdl:"path" json:"source_path"`
 	// Original filename of the wallpaper when it was added
